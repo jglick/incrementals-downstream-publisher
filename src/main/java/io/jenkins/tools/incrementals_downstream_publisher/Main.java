@@ -28,8 +28,11 @@ import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
 import java.io.File;
 import java.net.URL;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import org.apache.commons.io.FileUtils;
 
 public class Main {
@@ -40,22 +43,31 @@ public class Main {
         if (buildURL == null || jenkinsURL == null) {
             throw new IllegalStateException("Run this inside Jenkins so $BUILD_URL & $JENKINS_URL are set");
         }
-        DocumentContext data = JsonPath.parse(new URL(buildURL + "api/json?tree=actions[causes[upstreamUrl,upstreamProject,upstreamBuild]]"));
+        URL downstreamMetadata = new URL(buildURL + "api/json?tree=actions[causes[upstreamUrl,upstreamBuild]]");
+        System.out.println("Parsing: " + downstreamMetadata);
+        DocumentContext data = JsonPath.parse(downstreamMetadata);
         String upstreamUrl = data.read("$.actions[0].causes[0].upstreamUrl");
-        System.out.println(upstreamUrl);
+        /* currently unused:
         String upstreamProject = data.read("$.actions[0].causes[0].upstreamProject");
-        System.out.println(upstreamProject);
+        */
         int upstreamBuild = data.read("$.actions[0].causes[0].upstreamBuild");
-        System.out.println(upstreamBuild);
-        data = JsonPath.parse(new URL(jenkinsURL + upstreamUrl + upstreamBuild + "/api/json?tree=actions[revision[hash,pullHash]]"));
+        URL upstreamMetadata = new URL(jenkinsURL + upstreamUrl + upstreamBuild + "/api/json?tree=actions[revision[hash,pullHash]]");
+        System.out.println("Parsing: " + upstreamMetadata);
+        data = JsonPath.parse(upstreamMetadata);
         List<Map<String, String>> hashes = data.read("$.actions[*].revision.['hash', 'pullHash']");
         String hash = hashes.get(0).entrySet().iterator().next().getValue().substring(0, 12);
-        System.out.println(hash);
+        System.out.println("Commit hash: " + hash);
         URL zip = new URL(jenkinsURL + upstreamUrl + upstreamBuild + "/artifact/**/*-rc*." + hash + "/*-rc*." + hash + "*/*zip*/archive.zip");
         File download = File.createTempFile("download", ".zip");
         //download.deleteOnExit();
         FileUtils.copyURLToFile(zip, download);
-        System.out.println(download);
+        System.out.println("Artifacts: " + download);
+        try (ZipFile zf = new ZipFile(download)) {
+            Enumeration<? extends ZipEntry> entries = zf.entries();
+            while (entries.hasMoreElements()) {
+                System.out.println("Entry: " + entries.nextElement().getName());
+            }
+        }
     }
 
 }
