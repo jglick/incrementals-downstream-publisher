@@ -43,6 +43,10 @@ public class Main {
         if (buildURL == null || jenkinsURL == null) {
             throw new IllegalStateException("Run this inside Jenkins so $BUILD_URL & $JENKINS_URL are set");
         }
+        String downloadN = System.getenv("DOWNLOAD");
+        if (downloadN == null) {
+            throw new IllegalStateException("Specify $DOWNLOAD");
+        }
         URL downstreamMetadata = new URL(buildURL + "api/json?tree=actions[causes[upstreamUrl,upstreamBuild]]");
         System.out.println("Parsing: " + downstreamMetadata);
         DocumentContext data = JsonPath.parse(downstreamMetadata);
@@ -58,8 +62,7 @@ public class Main {
         String hash = hashes.get(0).entrySet().iterator().next().getValue().substring(0, 12);
         System.out.println("Commit hash: " + hash);
         URL zip = new URL(jenkinsURL + upstreamUrl + upstreamBuild + "/artifact/**/*-rc*." + hash + "/*-rc*." + hash + "*/*zip*/archive.zip");
-        File download = File.createTempFile("download", ".zip");
-        //download.deleteOnExit();
+        File download = new File(downloadN);
         FileUtils.copyURLToFile(zip, download);
         System.out.println("Artifacts: " + download);
         try (ZipFile zf = new ZipFile(download)) {
