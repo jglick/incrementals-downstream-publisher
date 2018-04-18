@@ -27,10 +27,13 @@ package io.jenkins.tools.incrementals_downstream_publisher;
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
 import java.io.File;
+import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import org.apache.commons.io.FileUtils;
@@ -55,12 +58,36 @@ public class Main {
         String upstreamProject = data.read("$.actions[0].causes[0].upstreamProject");
         */
         int upstreamBuild = data.read("$.actions[0].causes[0].upstreamBuild");
-        URL upstreamMetadata = new URL(jenkinsURL + upstreamUrl + upstreamBuild + "/api/json?tree=actions[revision[hash,pullHash]]");
+        URL upstreamMetadata = new URL(jenkinsURL + upstreamUrl + upstreamBuild + "/api/json?tree=actions[revision[hash,pullHash],remoteUrls]");
         System.out.println("Parsing: " + upstreamMetadata);
         data = JsonPath.parse(upstreamMetadata);
         List<Map<String, String>> hashes = data.read("$.actions[*].revision.['hash', 'pullHash']");
         String hash = hashes.get(0).entrySet().iterator().next().getValue().substring(0, 12);
         System.out.println("Commit hash: " + hash);
+        List<List<String>> remoteUrls = data.read("$.actions[*].remoteUrls");
+        if (remoteUrls.size() != 1 || remoteUrls.get(0).size() != 1) {
+            throw new IllegalStateException("Could not read remoteUrls: " + remoteUrls);
+        }
+        String remoteUrl = remoteUrls.get(0).get(0);
+        Matcher m = Pattern.compile("https://github[.]com/([^/]+/[^/]+?)([.]git)?").matcher(remoteUrl);
+        if (!m.matches()) {
+            throw new IllegalStateException("Did not recognize: " + remoteUrl);
+        }
+        String ownerRepo = m.group(1);
+        System.out.println("GitHub: " + ownerRepo);
+        String ghAuth = System.getenv("GITHUB_AUTH");
+        URL commit = new URL("https://" + (ghAuth != null ? ghAuth + "@" : "") + "api.github.com/repos/" + ownerRepo + "/commits/" + hash);
+        HttpURLConnection conn = (HttpURLConnection) commit.openConnection();
+        if (conn.getResponseCode() == 200) {
+            data = JsonPath.parse(conn.getInputStream());
+            boolean verified = data.read("$.commit.verification.verified");
+            String committer = data.read("$.committer.login");
+            // We may decide to decline to publish unsigned commits. For now this is just informational:
+            System.out.println("Commit hash seems to be unique. " + (verified ? "Signed & verified" : "Unverified") + " commit by " + committer + ".");
+        } else {
+            throw new IllegalStateException("Commit hash does not seem to exist, or prefix is not unique.");
+        }
+        conn.disconnect();
         URL zip = new URL(jenkinsURL + upstreamUrl + upstreamBuild + "/artifact/**/*-rc*." + hash + "/*-rc*." + hash + "*/*zip*/archive.zip");
         File download = new File(downloadN);
         FileUtils.copyURLToFile(zip, download);
