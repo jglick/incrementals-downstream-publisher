@@ -7,6 +7,6 @@ node {
     dir("$HOME/.m2/repository") {
       archiveArtifacts artifacts: "**/*$changelist/*$changelist*", excludes: '**/*.lastUpdated'
     }
-    build 'downstream'
+    build job: 'downstream', parameters: [string(name: 'UPSTREAM_URL', value: BUILD_URL)], quietPeriod: 0
   }
 }

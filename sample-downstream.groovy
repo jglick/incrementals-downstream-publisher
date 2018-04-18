@@ -1,6 +1,8 @@
+properties([parameters([string(name: 'UPSTREAM_URL', description: 'URL of upstream build.')])])
 node {
     git 'https://github.com/jglick/incrementals-downstream-publisher'
     env.DOWNLOAD = "${pwd tmp: true}/download.zip"
+    env.ALLOWED_UPSTREAM_FOLDERS = "${JENKINS_URL}job/jenkinsci/"
     withCredentials([usernameColonPassword(variable: 'DEPLOY_USERPASS', credentialsId: '…'), usernameColonPassword(variable: 'GITHUB_AUTH', credentialsId: 'github')]) {
       sh '''
       mvn -B verify

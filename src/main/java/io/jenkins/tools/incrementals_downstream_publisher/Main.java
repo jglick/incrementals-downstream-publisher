@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import org.apache.commons.io.FileUtils;
@@ -41,26 +42,24 @@ import org.apache.commons.io.FileUtils;
 public class Main {
 
     public static void main(String[] argv) throws Exception {
-        String buildURL = System.getenv("BUILD_URL");
-        String jenkinsURL = System.getenv("JENKINS_URL");
-        if (buildURL == null || jenkinsURL == null) {
-            throw new IllegalStateException("Run this inside Jenkins so $BUILD_URL & $JENKINS_URL are set");
+        String upstreamURL = System.getenv("UPSTREAM_URL");
+        if (upstreamURL == null) {
+            throw new IllegalStateException("Specify $UPSTREAM_URL");
+        }
+        String allowedUpstreamFolders = System.getenv("ALLOWED_UPSTREAM_FOLDERS");
+        if (allowedUpstreamFolders == null) {
+            throw new IllegalStateException("Specify $ALLOWED_UPSTREAM_FOLDERS");
+        }
+        if (!Stream.of(allowedUpstreamFolders.split(" ")).anyMatch(allowed -> upstreamURL.matches("\\Q" + allowed + "\\E(job/[^/]+/)+[0-9]+/"))) {
+            throw new IllegalStateException(upstreamURL + " not inside " + allowedUpstreamFolders);
         }
         String downloadN = System.getenv("DOWNLOAD");
         if (downloadN == null) {
             throw new IllegalStateException("Specify $DOWNLOAD");
         }
-        URL downstreamMetadata = new URL(buildURL + "api/json?tree=actions[causes[upstreamUrl,upstreamBuild]]");
-        System.out.println("Parsing: " + downstreamMetadata);
-        DocumentContext data = JsonPath.parse(downstreamMetadata);
-        String upstreamUrl = data.read("$.actions[0].causes[0].upstreamUrl");
-        /* currently unused:
-        String upstreamProject = data.read("$.actions[0].causes[0].upstreamProject");
-        */
-        int upstreamBuild = data.read("$.actions[0].causes[0].upstreamBuild");
-        URL upstreamMetadata = new URL(jenkinsURL + upstreamUrl + upstreamBuild + "/api/json?tree=actions[revision[hash,pullHash],remoteUrls]");
+        URL upstreamMetadata = new URL(upstreamURL + "api/json?tree=actions[revision[hash,pullHash],remoteUrls]");
         System.out.println("Parsing: " + upstreamMetadata);
-        data = JsonPath.parse(upstreamMetadata);
+        DocumentContext data = JsonPath.parse(upstreamMetadata);
         List<Map<String, String>> hashes = data.read("$.actions[*].revision.['hash', 'pullHash']");
         String hash = hashes.get(0).entrySet().iterator().next().getValue().substring(0, 12);
         System.out.println("Commit hash: " + hash);
@@ -88,7 +87,7 @@ public class Main {
             throw new IllegalStateException("Commit hash does not seem to exist, or prefix is not unique.");
         }
         conn.disconnect();
-        URL zip = new URL(jenkinsURL + upstreamUrl + upstreamBuild + "/artifact/**/*-rc*." + hash + "/*-rc*." + hash + "*/*zip*/archive.zip");
+        URL zip = new URL(upstreamURL + "artifact/**/*-rc*." + hash + "/*-rc*." + hash + "*/*zip*/archive.zip");
         File download = new File(downloadN);
         FileUtils.copyURLToFile(zip, download);
         System.out.println("Artifacts: " + download);
