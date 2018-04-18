@@ -5,7 +5,7 @@ node {
     sh "mvn -DskipTests -Dset.changelist help:evaluate -Dexpression=changelist -Doutput=$changelistF clean install"
     def changelist = readFile(changelistF)
     dir("$HOME/.m2/repository") {
-      archiveArtifacts "**/*$changelist/*$changelist*"
+      archiveArtifacts artifacts: "**/*$changelist/*$changelist*", excludes: '**/*.lastUpdated'
     }
     build 'downstream'
   }
