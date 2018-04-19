@@ -29,6 +29,7 @@ import com.jayway.jsonpath.JsonPath;
 import java.io.File;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.file.Files;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Map;
@@ -91,11 +92,17 @@ public class Main {
         File download = new File(downloadN);
         FileUtils.copyURLToFile(zip, download);
         System.out.println("Artifacts: " + download);
+        boolean empty = true;
         try (ZipFile zf = new ZipFile(download)) {
             Enumeration<? extends ZipEntry> entries = zf.entries();
             while (entries.hasMoreElements()) {
                 System.out.println("Entry: " + entries.nextElement().getName());
+                empty = false;
             }
+        }
+        if (empty) {
+            System.out.println("No permitted artifacts recorded (perhaps due to a PR merge build not up to date with the target branch); skipping deployment.");
+            Files.delete(download.toPath());
         }
     }
 
