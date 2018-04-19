@@ -33,14 +33,13 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -100,13 +99,8 @@ public class Main {
         }
         String ownerRepo = m.group(1);
         System.out.println("GitHub: " + ownerRepo);
-        String rpuIndex = IOUtils.toString(new URL(rpuIndexURL), StandardCharsets.UTF_8);
-        Optional<String> match = Pattern.compile("\r?\n").splitAsStream(rpuIndex).filter(line -> line.startsWith(ownerRepo + " ")).findFirst();
-        if (!match.isPresent()) {
-            throw new IllegalStateException(ownerRepo + " is not listed in " + rpuIndexURL);
-        }
-        String[] pieces = match.get().split(" ");
-        List<String> allowedPaths = Arrays.asList(pieces).subList(1, pieces.length);
+        data = JsonPath.parse(new URL(rpuIndexURL));
+        List<String> allowedPaths = data.read("$['" + ownerRepo + "']");
         String ghAuth = System.getenv("GITHUB_AUTH");
         URL commit = new URL("https://" + (ghAuth != null ? ghAuth + "@" : "") + "api.github.com/repos/" + ownerRepo + "/commits/" + hash);
         HttpURLConnection conn = (HttpURLConnection) commit.openConnection();
@@ -138,7 +132,7 @@ public class Main {
                 }
             }
         }
-        System.out.println("All entries fall within permitted paths: " + allowedPaths);
+        System.out.println("All entries fall within permitted paths: " + allowedPaths.stream().collect(Collectors.joining(" ")));
         if (pom == null) {
             System.out.println("No permitted artifacts including a POM recorded (perhaps due to a PR merge build not up to date with the target branch); skipping deployment.");
             Files.delete(download.toPath());
