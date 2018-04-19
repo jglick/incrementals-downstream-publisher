@@ -27,9 +27,13 @@ package io.jenkins.tools.incrementals_downstream_publisher;
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
 import java.io.File;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Base64;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +43,7 @@ import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.IOUtils;
 
 public class Main {
 
@@ -46,6 +51,9 @@ public class Main {
         String upstreamURL = System.getenv("UPSTREAM_URL");
         if (upstreamURL == null) {
             throw new IllegalStateException("Specify $UPSTREAM_URL");
+        }
+        if (!upstreamURL.endsWith("/")) {
+            throw new IllegalStateException("$UPSTREAM_URL must end in a /");
         }
         String allowedUpstreamFolders = System.getenv("ALLOWED_UPSTREAM_FOLDERS");
         if (allowedUpstreamFolders == null) {
@@ -57,6 +65,17 @@ public class Main {
         String downloadN = System.getenv("DOWNLOAD");
         if (downloadN == null) {
             throw new IllegalStateException("Specify $DOWNLOAD");
+        }
+        String deployURL = System.getenv("DEPLOY_URL");
+        if (deployURL == null) {
+            throw new IllegalStateException("Specify $DEPLOY_URL");
+        }
+        if (!deployURL.endsWith("/")) {
+            throw new IllegalStateException("$DEPLOY_URL must end in a /");
+        }
+        String deployAuth = System.getenv("DEPLOY_AUTH");
+        if (deployAuth == null) {
+            throw new IllegalStateException("Specify $DEPLOY_AUTH");
         }
         URL upstreamMetadata = new URL(upstreamURL + "api/json?tree=actions[revision[hash,pullHash],remoteUrls]");
         System.out.println("Parsing: " + upstreamMetadata);
@@ -92,17 +111,47 @@ public class Main {
         File download = new File(downloadN);
         FileUtils.copyURLToFile(zip, download);
         System.out.println("Artifacts: " + download);
-        boolean empty = true;
+        String pom = null;
         try (ZipFile zf = new ZipFile(download)) {
             Enumeration<? extends ZipEntry> entries = zf.entries();
             while (entries.hasMoreElements()) {
-                System.out.println("Entry: " + entries.nextElement().getName());
-                empty = false;
+                String entry = entries.nextElement().getName();
+                System.out.println("Entry: " + entry);
+                if (pom == null && entry.endsWith(".pom")) {
+                    pom = entry;
+                }
             }
         }
-        if (empty) {
-            System.out.println("No permitted artifacts recorded (perhaps due to a PR merge build not up to date with the target branch); skipping deployment.");
+        if (pom == null) {
+            System.out.println("No permitted artifacts including a POM recorded (perhaps due to a PR merge build not up to date with the target branch); skipping deployment.");
             Files.delete(download.toPath());
+            return;
+        }
+        conn = (HttpURLConnection) new URL(deployURL + pom).openConnection();
+        if (conn.getResponseCode() == 200) {
+            System.out.println(deployURL + pom + " already exists; skipping redeployment.");
+            return;
+        }
+        conn = (HttpURLConnection) new URL(deployURL + "archive.zip").openConnection();
+        conn.setDoOutput(true);
+        conn.setRequestProperty("X-Explode-Archive", "true");
+        conn.setRequestProperty("X-Explode-Archive-Atomic", "true");
+        conn.setRequestProperty("Authorization", "Basic " + Base64.getEncoder().encodeToString(deployAuth.getBytes(StandardCharsets.UTF_8)));
+        conn.setRequestProperty("Content-Length", Long.toString(download.length()));
+        conn.setRequestMethod("PUT");
+        try (OutputStream os = conn.getOutputStream()) {
+            FileUtils.copyFile(download, os);
+        }
+        int status = conn.getResponseCode();
+        if (status != 200) {
+            InputStream errs = conn.getErrorStream();
+            throw new IllegalStateException("Deployment failed with code " + status + (errs != null ? ": " + IOUtils.toString(errs, conn.getContentEncoding()).trim() : ""));
+        }
+        conn = (HttpURLConnection) new URL(deployURL + pom).openConnection();
+        if (conn.getResponseCode() == 200) {
+            System.out.println("Deployment successful.");
+        } else {
+            throw new IllegalStateException("Deployment claimed successful but the artifacts do not really seem to be there.");
         }
     }
 
