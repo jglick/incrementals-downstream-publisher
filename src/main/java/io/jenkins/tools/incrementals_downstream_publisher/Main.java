@@ -33,10 +33,12 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -77,6 +79,10 @@ public class Main {
         if (deployAuth == null) {
             throw new IllegalStateException("Specify $DEPLOY_AUTH");
         }
+        String rpuIndexURL = System.getenv("RPU_INDEX");
+        if (rpuIndexURL == null) {
+            throw new IllegalStateException("Specify $RPU_INDEX");
+        }
         URL upstreamMetadata = new URL(upstreamURL + "api/json?tree=actions[revision[hash,pullHash],remoteUrls]");
         System.out.println("Parsing: " + upstreamMetadata);
         DocumentContext data = JsonPath.parse(upstreamMetadata);
@@ -94,6 +100,13 @@ public class Main {
         }
         String ownerRepo = m.group(1);
         System.out.println("GitHub: " + ownerRepo);
+        String rpuIndex = IOUtils.toString(new URL(rpuIndexURL), StandardCharsets.UTF_8);
+        Optional<String> match = Pattern.compile("\r?\n").splitAsStream(rpuIndex).filter(line -> line.startsWith(ownerRepo + " ")).findFirst();
+        if (!match.isPresent()) {
+            throw new IllegalStateException(ownerRepo + " is not listed in " + rpuIndexURL);
+        }
+        String[] pieces = match.get().split(" ");
+        List<String> allowedPaths = Arrays.asList(pieces).subList(1, pieces.length);
         String ghAuth = System.getenv("GITHUB_AUTH");
         URL commit = new URL("https://" + (ghAuth != null ? ghAuth + "@" : "") + "api.github.com/repos/" + ownerRepo + "/commits/" + hash);
         HttpURLConnection conn = (HttpURLConnection) commit.openConnection();
@@ -117,11 +130,15 @@ public class Main {
             while (entries.hasMoreElements()) {
                 String entry = entries.nextElement().getName();
                 System.out.println("Entry: " + entry);
+                if (!allowedPaths.stream().anyMatch(path -> entry.startsWith(path + "/"))) {
+                    throw new IllegalStateException("Attempt to deploy " + entry + " which is not inside " + allowedPaths + " specified for " + ownerRepo + " by " + rpuIndexURL);
+                }
                 if (pom == null && entry.endsWith(".pom")) {
                     pom = entry;
                 }
             }
         }
+        System.out.println("All entries fall within permitted paths: " + allowedPaths);
         if (pom == null) {
             System.out.println("No permitted artifacts including a POM recorded (perhaps due to a PR merge build not up to date with the target branch); skipping deployment.");
             Files.delete(download.toPath());
