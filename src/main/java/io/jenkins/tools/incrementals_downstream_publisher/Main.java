@@ -82,22 +82,21 @@ public class Main {
         if (rpuIndexURL == null) {
             throw new IllegalStateException("Specify $RPU_INDEX");
         }
-        URL upstreamMetadata = new URL(upstreamURL + "api/json?tree=actions[revision[hash,pullHash],remoteUrls]");
+        URL upstreamMetadata = new URL(upstreamURL + "api/json?tree=actions[revision[hash,pullHash]]");
         System.out.println("Parsing: " + upstreamMetadata);
         DocumentContext data = JsonPath.parse(upstreamMetadata);
         List<Map<String, String>> hashes = data.read("$.actions[*].revision.['hash', 'pullHash']");
         String hash = hashes.get(0).entrySet().iterator().next().getValue().substring(0, 12);
         System.out.println("Commit hash: " + hash);
-        List<List<String>> remoteUrls = data.read("$.actions[*].remoteUrls");
-        if (remoteUrls.size() != 1 || remoteUrls.get(0).size() != 1) {
-            throw new IllegalStateException("Could not read remoteUrls: " + remoteUrls);
+        URL upstreamFolderMetadata = new URL(upstreamURL + "../../../api/json?tree=sources[source[repoOwner,repository]]");
+        System.out.println("Parsing: " + upstreamFolderMetadata);
+        data = JsonPath.parse(upstreamFolderMetadata);
+        List<String> repoOwner = data.read("$.sources[*].source.repoOwner");
+        List<String> repository = data.read("$.sources[*].source.repository");
+        if (repoOwner.size() != 1 || repository.size() != 1) {
+            throw new IllegalStateException("Repository folder does not seem to be configured for GitHub");
         }
-        String remoteUrl = remoteUrls.get(0).get(0);
-        Matcher m = Pattern.compile("https://github[.]com/([^/]+/[^/]+?)([.]git)?").matcher(remoteUrl);
-        if (!m.matches()) {
-            throw new IllegalStateException("Did not recognize: " + remoteUrl);
-        }
-        String ownerRepo = m.group(1);
+        String ownerRepo = repoOwner.get(0) + "/" + repository.get(0);
         System.out.println("GitHub: " + ownerRepo);
         data = JsonPath.parse(new URL(rpuIndexURL));
         List<String> allowedPaths = data.read("$['" + ownerRepo + "']");
