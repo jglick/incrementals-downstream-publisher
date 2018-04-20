@@ -37,12 +37,11 @@ import java.util.Base64;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import net.minidev.json.JSONObject;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 
@@ -86,7 +85,8 @@ public class Main {
         System.out.println("Parsing: " + upstreamMetadata);
         DocumentContext data = JsonPath.parse(upstreamMetadata);
         List<Map<String, String>> hashes = data.read("$.actions[*].revision.['hash', 'pullHash']");
-        String hash = hashes.get(0).entrySet().iterator().next().getValue().substring(0, 12);
+        String fullHash = hashes.get(0).entrySet().iterator().next().getValue();
+        String hash = fullHash.substring(0, 12);
         System.out.println("Commit hash: " + hash);
         URL upstreamFolderMetadata = new URL(upstreamURL + "../../../api/json?tree=sources[source[repoOwner,repository]]");
         System.out.println("Parsing: " + upstreamFolderMetadata);
@@ -163,6 +163,30 @@ public class Main {
         } else {
             throw new IllegalStateException("Deployment claimed successful but the artifacts do not really seem to be there.");
         }
+        /* TODO fails with a 404 not easily explained by https://developer.github.com/v3/troubleshooting/#why-am-i-getting-a-404-error-on-a-repository-that-exists
+        if (ghAuth != null) {
+            JSONObject json = new JSONObject();
+            json.appendField("state", "success");
+            json.appendField("context", "continuous-integration/jenkins/incrementals");
+            json.appendField("target_url", deployURL + pom);
+            json.appendField("description", "Deployed to Incrementals.");
+            String jsonS = json.toJSONString();
+            byte[] jsonB = jsonS.getBytes(StandardCharsets.UTF_8);
+            String endpoint = "/repos/" + ownerRepo + "/statuses/" + fullHash;
+            conn = (HttpURLConnection) new URL("https://" + ghAuth + "@api.github.com" + endpoint).openConnection();
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Length", Integer.toString(jsonB.length));
+            conn.setRequestMethod("POST");
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(jsonB);
+            }
+            status = conn.getResponseCode();
+            if (status != 200) {
+                InputStream errs = conn.getErrorStream();
+                throw new IllegalStateException("POSTing " + jsonS + " to " + endpoint + " failed with code " + status + (errs != null ? ": " + IOUtils.toString(errs, conn.getContentEncoding()).trim() : ""));
+            }
+        }
+        */
     }
 
 }
